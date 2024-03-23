@@ -1,3 +1,5 @@
+use crate::slaughterhouse::AnimalLike;
+
 mod slaughterhouse {
     use std::{
         collections::HashMap,
@@ -5,13 +7,13 @@ mod slaughterhouse {
         ops::{Deref, DerefMut},
     };
 
-    type Hook = Option<Box<dyn AnimalLike>>;
+    type Hook<'a> = Option<Box<dyn AnimalLike<'a> + 'a>>;
 
-    pub struct Hall {
-        hooks: Vec<Hook>,
+    pub struct Hall<'a> {
+        hooks: Vec<Hook<'a>>,
     }
 
-    impl Hall {
+    impl<'a> Hall<'a> {
         pub fn new(capacity: usize) -> Self {
             Self {
                 hooks: vec![None; capacity],
@@ -19,7 +21,7 @@ mod slaughterhouse {
         }
     }
 
-    type Unit<'a> = HashMap<&'a str, Hall>;
+    type Unit<'a> = HashMap<&'a str, Hall<'a>>;
     type Locations<'a> = HashMap<&'a str, Unit<'a>>;
 
     pub struct Slaughterhouse<'a>(Locations<'a>);
@@ -79,7 +81,7 @@ mod slaughterhouse {
             &mut self,
             location: &'a str,
             unit: &'a str,
-            animal: Box<dyn AnimalLike>,
+            animal: Box<dyn AnimalLike<'a>>,
         ) -> Result<usize, Box<dyn Error>> {
             if self.has_free_hook() {
                 let index = self.next_free_hook_index()?;
@@ -99,7 +101,7 @@ mod slaughterhouse {
             location: &'a str,
             unit_name: &'a str,
             index: usize,
-        ) -> Result<Box<dyn AnimalLike>, Box<dyn Error>> {
+        ) -> Result<Box<dyn AnimalLike<'a> + 'a>, Box<dyn Error>> {
             let animal = self
                 .get(location)
                 .and_then(|unit| unit.get(unit_name))
@@ -108,32 +110,32 @@ mod slaughterhouse {
             animal.ok_or("Animal not found".into())
         }
 
-        pub fn iter_hooks(&self) -> impl Iterator<Item = &Hook> {
+        pub fn iter_hooks(&self) -> impl Iterator<Item = &Hook<'a>> {
             self.iter()
-                .flat_map(|(_, unit)| unit.iter().flat_map(|(_, hall)| hall.hooks.iter()))
+                .flat_map(move |(_, unit)| unit.iter().flat_map(|(_, hall)| hall.hooks.iter()))
         }
     }
 
-    pub trait AnimalLike: AnimalClone + std::fmt::Debug {
+    pub trait AnimalLike<'a>: AnimalClone<'a> + std::fmt::Debug {
         fn race(&self) -> &str;
+        fn get_name(&self) -> String;
     }
 
-    pub trait AnimalClone {
-        fn clone_box(&self) -> Box<dyn AnimalLike>;
+    pub trait AnimalClone<'a> {
+        fn clone_box(&self) -> Box<dyn AnimalLike<'a> + 'a>;
     }
 
-    // Implement AnimalClone for all T where T is AnimalLike and Clone.
-    impl<T> AnimalClone for T
+    impl<'a, T> AnimalClone<'a> for T
     where
-        T: 'static + AnimalLike + Clone,
+        T: 'a + AnimalLike<'a> + Clone,
     {
-        fn clone_box(&self) -> Box<dyn AnimalLike> {
+        fn clone_box(&self) -> Box<dyn AnimalLike<'a> + 'a> {
             Box::new(self.clone())
         }
     }
 
-    impl Clone for Box<dyn AnimalLike> {
-        fn clone(&self) -> Box<dyn AnimalLike> {
+    impl<'a> Clone for Box<dyn AnimalLike<'a> + 'a> {
+        fn clone(&self) -> Box<dyn AnimalLike<'a> + 'a> {
             self.clone_box()
         }
     }
@@ -144,15 +146,22 @@ mod slaughterhouse {
 }
 
 #[derive(Clone, Debug)]
-struct Cow;
-impl slaughterhouse::AnimalLike for Cow {
+struct Cow {
+    name: String,
+}
+impl<'a> slaughterhouse::AnimalLike<'a> for Cow {
     fn race(&self) -> &str {
         "Cow"
+    }
+    fn get_name(&self) -> String {
+        self.name.clone()
     }
 }
 impl Cow {
     fn new() -> Box<Self> {
-        Box::new(Cow)
+        Box::new(Cow {
+            name: "Bessie".to_string(),
+        })
     }
 }
 
@@ -163,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cow = Cow::new();
     let my_second_cow = Cow::new();
-    let hook_index = slayhouse.add_animal("Farm", "Barn", cow)?;
+    let hook_index = slayhouse.add_animal("Farm", "Barn", cow.clone())?;
     slayhouse.add_animal("Farm", "Barn", my_second_cow)?;
     let animal = slayhouse.get_animal("Farm", "Barn", 0)?;
 
@@ -172,6 +181,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print!("{:?} ", hook);
     });
     println!();
+
+    println!("{:?}", (*cow).get_name());
 
     Ok(())
 }
